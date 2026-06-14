@@ -5,6 +5,8 @@ description = "Genealogy research agent — agentic AI study platform"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "anthropic>=0.109.1",
+    "diskcache>=5.6.3",
     "ged4py>=0.5.2",
     "ipython>=9.14.1",
     "pydantic>=2.13.4",

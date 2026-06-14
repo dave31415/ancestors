@@ -25,12 +25,14 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Callable
 
 from pydantic import BaseModel, Field, StringConstraints, ValidationError
 
 from ancestors import dsl
+from ancestors.agent.observability import HookRegistry
 from ancestors.models import (
     EventType,
     GapType,
@@ -229,13 +231,45 @@ class Dispatcher:
     Holds the IdSet handle store and call count. Tools never see this object
     — they see only their declared arguments, with IdSet inputs resolved
     transparently by `_resolve_args`.
+
+    Observability: when a HookRegistry is attached, every call emits
+    `before_dispatch`, then either `after_dispatch` or `on_error`, with
+    timing data. The hook layer never affects the result — observer
+    exceptions are logged and swallowed.
     """
 
     sets: dict[str, IdSet] = field(default_factory=dict)
     call_count: int = 0
+    hooks: HookRegistry | None = None
     _next_handle: int = 1
 
     def dispatch(self, tool_name: str, args: dict[str, Any]) -> DispatchResult:
+        start = time.time()
+        if self.hooks is not None:
+            self.hooks.emit("before_dispatch", tool=tool_name, args=args)
+        result = self._dispatch_impl(tool_name, args)
+        duration_ms = (time.time() - start) * 1000
+        if self.hooks is not None:
+            if result.ok:
+                self.hooks.emit(
+                    "after_dispatch",
+                    tool=tool_name,
+                    args=args,
+                    result_summary=_summarize_result(result),
+                    duration_ms=duration_ms,
+                )
+            else:
+                self.hooks.emit(
+                    "on_error",
+                    tool=tool_name,
+                    args=args,
+                    error_code=result.error.code if result.error else None,
+                    error_message=result.error.message if result.error else None,
+                    duration_ms=duration_ms,
+                )
+        return result
+
+    def _dispatch_impl(self, tool_name: str, args: dict[str, Any]) -> DispatchResult:
         if self.call_count >= MAX_CALLS_PER_SESSION:
             return DispatchResult(
                 ok=False,
@@ -368,3 +402,20 @@ def list_tools() -> list[dict[str, str]]:
         }
         for t in TOOLS.values()
     ]
+
+
+def _summarize_result(result: DispatchResult) -> dict[str, Any]:
+    """Compact, observable view of a successful result.
+
+    Keeps trace lines small — we log handle + size for sets, value type +
+    length for hydration, raw value for scalars. Full payloads stay in the
+    dispatcher's set store, off the trace.
+    """
+    if result.set_handle is not None:
+        return {"set_handle": result.set_handle, "set_size": result.set_size}
+    value = result.value
+    if isinstance(value, list):
+        return {"value_type": "list", "length": len(value)}
+    if isinstance(value, dict):
+        return {"value_type": "dict", "keys": list(value.keys())[:8]}
+    return {"value_type": type(value).__name__, "value": value}
