@@ -416,3 +416,76 @@ def test_state_transitions_emit_hook_events():
     assert transitions[0].from_state == "INTAKE"
     assert transitions[0].to_state == "PLAN"
     assert transitions[-1].to_state == "ANSWER"
+
+
+def test_run_lifecycle_events_capture_question_plan_assessment_and_answer():
+    events, observer = make_collector()
+    hooks = HookRegistry()
+    hooks.subscribe(observer)
+    loop, _, _, _ = _build_loop(
+        plans=[
+            Plan(
+                calls=[
+                    PlannedCall(
+                        "all_individuals", {}, "scope the corpus first"
+                    )
+                ],
+                rationale="want a starting set",
+            )
+        ],
+        assessments=[
+            Assessment(
+                decision="answer",
+                answer_text="There are 336 people in this tree.",
+                answer_confidence=ConfidenceLevel.CONFIRMED,
+                reasoning="Used all_individuals; size is 336.",
+                new_facts=[
+                    Fact(claim="corpus has 336", confidence=ConfidenceLevel.CONFIRMED)
+                ],
+            )
+        ],
+        hooks=hooks,
+    )
+    loop.run("How many people are in this tree?")
+
+    by_kind = {e.kind: e for e in events}
+    assert "on_run_start" in by_kind
+    assert by_kind["on_run_start"].extra["question"] == "How many people are in this tree?"
+
+    plan_events = [e for e in events if e.kind == "on_plan"]
+    assert len(plan_events) == 1
+    p = plan_events[0]
+    assert p.extra["rationale"] == "want a starting set"
+    assert p.extra["calls"][0]["tool"] == "all_individuals"
+    assert p.extra["calls"][0]["justification"] == "scope the corpus first"
+
+    assess_events = [e for e in events if e.kind == "on_assessment"]
+    assert len(assess_events) == 1
+    a = assess_events[0]
+    assert a.extra["decision"] == "answer"
+    assert a.extra["answer_text"] == "There are 336 people in this tree."
+    assert a.extra["answer_confidence"] == "confirmed"
+    assert a.extra["reasoning"].startswith("Used all_individuals")
+    assert a.extra["facts_added"][0]["claim"] == "corpus has 336"
+
+    complete_events = [e for e in events if e.kind == "on_run_complete"]
+    assert len(complete_events) == 1
+    c = complete_events[0]
+    assert c.extra["terminal_state"] == "ANSWER"
+    assert c.extra["answer_text"] == "There are 336 people in this tree."
+    assert c.extra["confirmed_facts"][0]["claim"] == "corpus has 336"
+
+
+def test_run_complete_event_captures_stuck_reason():
+    events, observer = make_collector()
+    hooks = HookRegistry()
+    hooks.subscribe(observer)
+    loop, _, _, _ = _build_loop(
+        plans=[Plan(calls=[PlannedCall("all_individuals", {}, "")], rationale="")],
+        assessments=[Assessment(decision="stuck", stuck_reason="no path")],
+        hooks=hooks,
+    )
+    loop.run("impossible question")
+    completes = [e for e in events if e.kind == "on_run_complete"]
+    assert completes[0].extra["terminal_state"] == "STUCK"
+    assert completes[0].extra["stuck_reason"] == "no path"

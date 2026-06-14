@@ -154,6 +154,7 @@ class AgentLoop:
 
     def run(self, question: str) -> LoopResult:
         ctx = LoopContext(question=question, state=new_state(question))
+        self._emit("on_run_start", extra={"question": question})
         transitions = 0
         while ctx.state_name not in TERMINAL_STATES:
             self._transition(ctx)
@@ -169,7 +170,7 @@ class AgentLoop:
                 self._emit_transition(StateName.STUCK, StateName.STUCK, ctx)
                 break
 
-        return LoopResult(
+        result = LoopResult(
             terminal_state=ctx.state_name,
             answer_text=ctx.answer_text,
             answer_confidence=ctx.answer_confidence,
@@ -178,6 +179,35 @@ class AgentLoop:
             turns=ctx.turn_index,
             total_dispatches=ctx.total_dispatches,
         )
+        self._emit(
+            "on_run_complete",
+            extra={
+                "question": question,
+                "terminal_state": result.terminal_state.value,
+                "answer_text": result.answer_text,
+                "answer_confidence": (
+                    result.answer_confidence.value
+                    if result.answer_confidence is not None
+                    else None
+                ),
+                "stuck_reason": result.stuck_reason,
+                "turns": result.turns,
+                "total_dispatches": result.total_dispatches,
+                "confirmed_facts": [
+                    {"claim": f.claim, "confidence": f.confidence.value}
+                    for f in result.final_state.confirmed_facts
+                ],
+                "working_hypotheses": [
+                    {"claim": h.claim, "confidence": h.confidence.value}
+                    for h in result.final_state.working_hypotheses
+                ],
+                "dead_ends": [
+                    {"description": d.description, "reason": d.reason}
+                    for d in result.final_state.dead_ends
+                ],
+            },
+        )
+        return result
 
     # ---- state handlers ----
 
@@ -202,6 +232,17 @@ class AgentLoop:
         plan = self.planner(ctx.question, ctx.state)
         ctx.queue.extend(plan.calls)
         ctx.turn_index += 1
+        self._emit(
+            "on_plan",
+            extra={
+                "turn_index": ctx.turn_index,
+                "rationale": plan.rationale,
+                "calls": [
+                    {"tool": c.tool, "args": c.args, "justification": c.justification}
+                    for c in plan.calls
+                ],
+            },
+        )
         return StateName.EXECUTE
 
     def _execute(self, ctx: LoopContext) -> StateName:
@@ -226,6 +267,34 @@ class AgentLoop:
     def _assess(self, ctx: LoopContext) -> StateName:
         assessment = self.assessor(ctx.question, ctx.state, ctx.recent_results)
         ctx.state = _apply_assessment(ctx.state, assessment)
+        self._emit(
+            "on_assessment",
+            extra={
+                "turn_index": ctx.turn_index,
+                "decision": assessment.decision,
+                "reasoning": assessment.reasoning,
+                "facts_added": [
+                    {"claim": f.claim, "confidence": f.confidence.value}
+                    for f in assessment.new_facts
+                ],
+                "hypotheses_added": [
+                    {"claim": h.claim, "rationale": h.rationale}
+                    for h in assessment.new_hypotheses
+                ],
+                "dead_ends_added": [
+                    {"description": d.description, "reason": d.reason}
+                    for d in assessment.new_dead_ends
+                ],
+                "answer_text": assessment.answer_text,
+                "answer_confidence": (
+                    assessment.answer_confidence.value
+                    if assessment.answer_confidence is not None
+                    else None
+                ),
+                "stuck_reason": assessment.stuck_reason,
+                "results_seen": len(ctx.recent_results),
+            },
+        )
         ctx.recent_results = []
 
         if assessment.decision == "answer":
@@ -286,6 +355,11 @@ class AgentLoop:
             to_state=new.value,
             turn_index=ctx.turn_index,
         )
+
+    def _emit(self, kind: str, *, extra: dict | None = None) -> None:
+        if self.hooks is None:
+            return
+        self.hooks.emit(kind, extra=extra or {})
 
 
 # ---------------------------------------------------------------------------

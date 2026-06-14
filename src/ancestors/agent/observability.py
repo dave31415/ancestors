@@ -31,11 +31,19 @@ from typing import Any, Callable, Literal, Protocol
 log = logging.getLogger(__name__)
 
 EventKind = Literal[
+    # Dispatcher lifecycle.
     "before_dispatch",
     "after_dispatch",
     "on_error",
+    # Loop lifecycle. The loop emits these so traces are self-contained —
+    # the question, the model's plan rationale, the model's assessment, and
+    # the final answer or stuck reason all show up in the JSONL trace
+    # without needing the demo's stdout.
+    "on_run_start",
     "on_state_transition",
-    "on_turn_complete",
+    "on_plan",
+    "on_assessment",
+    "on_run_complete",
 ]
 
 
