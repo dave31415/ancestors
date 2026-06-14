@@ -1,9 +1,27 @@
 [project]
 name = "ancestors"
 version = "0.1.0"
-description = "Add your description here"
+description = "Genealogy research agent — agentic AI study platform"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "ged4py>=0.5.2",
     "ipython>=9.14.1",
+    "pydantic>=2.13.4",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ancestors"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
