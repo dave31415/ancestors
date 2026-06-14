@@ -67,10 +67,11 @@ def test_close_open_question_removes_it():
     assert s.open_questions == ["q2"]
 
 
-def test_summary_is_compact_text():
+def test_summary_includes_question_and_fact_claim():
     s = new_state("Is X true?").add_fact(
         Fact(claim="a", confidence=ConfidenceLevel.CONFIRMED)
     )
     text = s.summary()
     assert "Is X true?" in text
-    assert "Confirmed facts: 1" in text
+    assert "a" in text  # the actual claim text must appear
+    assert "confirmed" in text

@@ -168,14 +168,38 @@ class ResearchState(BaseModel):
     # ---- readers ----
 
     def summary(self) -> str:
-        """Compact textual summary suitable for an LLM prompt."""
-        return (
-            f"Question: {self.question}\n"
-            f"Confirmed facts: {len(self.confirmed_facts)}\n"
-            f"Working hypotheses: {len(self.working_hypotheses)}\n"
-            f"Open questions: {len(self.open_questions)}\n"
-            f"Dead ends: {len(self.dead_ends)}\n"
-        )
+        """Compact textual summary suitable for an LLM prompt.
+
+        This IS the agent's cross-turn memory — if a piece of knowledge isn't
+        rendered here, the next turn won't have it. Counts alone are not
+        enough; we render each fact/hypothesis/dead_end as a short line.
+        """
+        parts: list[str] = [f"Question: {self.question}"]
+
+        if self.confirmed_facts:
+            parts.append(f"\nConfirmed facts ({len(self.confirmed_facts)}):")
+            for f in self.confirmed_facts:
+                src = f" [sources: {', '.join(f.sources)}]" if f.sources else ""
+                parts.append(f"  - [{f.confidence}] {f.claim}{src}")
+        else:
+            parts.append("\nConfirmed facts: (none yet)")
+
+        if self.working_hypotheses:
+            parts.append(f"\nWorking hypotheses ({len(self.working_hypotheses)}):")
+            for h in self.working_hypotheses:
+                parts.append(f"  - [{h.confidence}] {h.claim} — {h.rationale}")
+
+        if self.open_questions:
+            parts.append(f"\nOpen sub-questions ({len(self.open_questions)}):")
+            for q in self.open_questions:
+                parts.append(f"  - {q}")
+
+        if self.dead_ends:
+            parts.append(f"\nDead ends ({len(self.dead_ends)}):")
+            for d in self.dead_ends:
+                parts.append(f"  - {d.description} ({d.reason})")
+
+        return "\n".join(parts)
 
 
 def new_state(question: str) -> ResearchState:

@@ -219,3 +219,6 @@ __marimo__/
 
 *.ged
 
+# Agent traces — session-specific, often large
+traces/
+

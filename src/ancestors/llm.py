@@ -27,7 +27,10 @@ log = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "claude-opus-4-7"
 DEFAULT_MAX_TOKENS = 4096
-DEFAULT_TEMPERATURE = 0.0
+# Newer Claude models (Opus 4.7+) reject `temperature` outright — it's
+# deprecated in favour of thinking-mode controls. We default to None and
+# only pass the parameter when the caller explicitly sets it.
+DEFAULT_TEMPERATURE: float | None = None
 
 
 class LlmConfigError(RuntimeError):
@@ -101,7 +104,7 @@ class CachedAnthropic:
         system: str | list[dict[str, Any]] | None = None,
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
-        temperature: float = DEFAULT_TEMPERATURE,
+        temperature: float | None = DEFAULT_TEMPERATURE,
         model: str | None = None,
         tool_choice: dict[str, Any] | None = None,
     ) -> Message:
@@ -114,8 +117,9 @@ class CachedAnthropic:
             "model": model or self.model,
             "messages": messages,
             "max_tokens": max_tokens,
-            "temperature": temperature,
         }
+        if temperature is not None:
+            request["temperature"] = temperature
         if system is not None:
             request["system"] = system
         if tools is not None:
