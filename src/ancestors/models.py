@@ -200,6 +200,23 @@ class GapType(StrEnum):
     NO_EVENTS = "no_events"
 
 
+class CommonAncestorResult(BaseModel):
+    """The most recent common ancestor of two individuals.
+
+    When no common ancestor is reachable within the configured generation
+    cap, every field is None. The kinship label is hand-derived from the
+    pair of generation distances using standard genealogical vocabulary
+    (siblings, first cousins, aunt/uncle, etc.); it is a hint for the
+    agent's prose, not load-bearing for evidence claims.
+    """
+
+    ancestor_id: str | None = None
+    ancestor_name: str | None = None
+    generations_to_a: int | None = None
+    generations_to_b: int | None = None
+    relationship_label: str | None = None
+
+
 class SortKey(StrEnum):
     """The key dimensions sort_by understands.
 

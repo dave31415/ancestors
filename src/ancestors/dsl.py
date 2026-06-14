@@ -22,6 +22,7 @@ from collections import Counter
 
 from ancestors.models import (
     AncestorNode,
+    CommonAncestorResult,
     DescendantNode,
     EventType,
     GapType,
@@ -136,6 +137,102 @@ def get_siblings_of(person_id: str) -> IdSet:
                 seen.add(cid)
                 ids.append(cid)
     return IdSet(ids=ids)
+
+
+def find_common_ancestor(
+    a_id: str, b_id: str, max_generations: int = 20
+) -> CommonAncestorResult:
+    """The most recent common ancestor (MRCA) between two named individuals.
+
+    Walks ancestors of each side, intersects, picks the candidate with the
+    smallest total generation distance. Returns id, name, the two distances,
+    and a hand-derived kinship label. When no shared ancestor exists within
+    the cap, every field is None and the agent should report no documented
+    relationship (within this corpus, at this depth).
+    """
+    a_set = get_ancestors_of(a_id, max_generations)
+    b_set = get_ancestors_of(b_id, max_generations)
+
+    b_index: dict[str, int] = {
+        i: int(b_set.metadata.get(i, {}).get("generation", -1))
+        for i in b_set.ids
+    }
+    common: list[tuple[str, int, int]] = []
+    for i in a_set.ids:
+        if i in b_index:
+            a_gen = int(a_set.metadata.get(i, {}).get("generation", -1))
+            b_gen = b_index[i]
+            common.append((i, a_gen, b_gen))
+
+    if not common:
+        return CommonAncestorResult()
+
+    ancestor_id, gen_a, gen_b = min(common, key=lambda t: (t[1] + t[2], t[1], t[2]))
+    db = current_session().db
+    name = db.individuals[ancestor_id].display_name if ancestor_id in db.individuals else None
+    return CommonAncestorResult(
+        ancestor_id=ancestor_id,
+        ancestor_name=name,
+        generations_to_a=gen_a,
+        generations_to_b=gen_b,
+        relationship_label=_label_kinship(gen_a, gen_b),
+    )
+
+
+def _label_kinship(gen_a: int, gen_b: int) -> str:
+    """Render a generation-distance pair as standard genealogical kinship.
+
+    Conventions used:
+      0,0           same individual
+      0,N or N,0    ancestor / descendant (parent, grandparent, ...-grandparent)
+      1,1           siblings
+      1,N (N>1)     aunt/uncle (with "great-" prefixes by removed distance)
+      M,M (M>=2)    Mth-1 cousins (so 2,2 = first cousins)
+      M,N (M!=N)    cousins with "N times removed" suffix
+    """
+    if gen_a == 0 and gen_b == 0:
+        return "same individual"
+    if gen_a == 0 or gen_b == 0:
+        n = max(gen_a, gen_b)
+        return _ancestor_descent_label(n)
+
+    min_d = min(gen_a, gen_b)
+    removed = abs(gen_a - gen_b)
+    if min_d == 1:
+        if removed == 0:
+            return "siblings (full or half — shared parent recorded)"
+        greats = "great-" * (removed - 1)
+        return f"{greats}aunt/uncle ↔ {greats}niece/nephew"
+
+    cousin_degree = min_d - 1
+    base = f"{_ordinal(cousin_degree)} cousins"
+    if removed == 0:
+        return base
+    return f"{base} {_removed_phrase(removed)}"
+
+
+def _ancestor_descent_label(n: int) -> str:
+    if n == 1:
+        return "parent ↔ child"
+    if n == 2:
+        return "grandparent ↔ grandchild"
+    greats = "great-" * (n - 2)
+    return f"{greats}grandparent ↔ {greats}grandchild"
+
+
+def _ordinal(n: int) -> str:
+    table = {1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth", 6: "sixth", 7: "seventh", 8: "eighth"}
+    return table.get(n, f"{n}th")
+
+
+def _removed_phrase(n: int) -> str:
+    if n == 1:
+        return "once removed"
+    if n == 2:
+        return "twice removed"
+    if n == 3:
+        return "thrice removed"
+    return f"{n} times removed"
 
 
 def get_spouses_of(person_id: str) -> IdSet:

@@ -86,6 +86,13 @@ class _AncestorsArgs(BaseModel):
     max_generations: Generations = 20
 
 
+class _CommonAncestorArgs(BaseModel):
+    model_config = {"extra": "forbid"}
+    a_id: PersonId
+    b_id: PersonId
+    max_generations: Generations = 20
+
+
 class _SetOnly(BaseModel):
     model_config = {"extra": "forbid"}
     ids: SetHandle
@@ -186,6 +193,8 @@ TOOLS: dict[str, Tool] = {
              "Direct siblings (children of the same parent-family)."),
         Tool("get_spouses_of", _PersonOnly, dsl.get_spouses_of,
              "All recorded spouses across spouse-families."),
+        Tool("find_common_ancestor", _CommonAncestorArgs, dsl.find_common_ancestor,
+             "Find the most recent common ancestor of two named individuals. Returns ancestor id+name, generation distance on each side, and a kinship label (siblings, first cousins, etc.). Returns nulls when no common ancestor exists within max_generations."),
         Tool("intersect", _TwoSets, dsl.intersect,
              "Set intersection. Metadata from a wins on overlap."),
         Tool("union", _TwoSets, dsl.union,
@@ -440,6 +449,10 @@ class Dispatcher:
             return DispatchResult(
                 ok=True, tool=tool_name, value=[g.value for g in result]
             )
+        if isinstance(result, BaseModel):
+            # Any structured Pydantic result (CommonAncestorResult, future
+            # scalar-shaped tools) is rendered to a dict the LLM can read.
+            return DispatchResult(ok=True, tool=tool_name, value=result.model_dump())
         return DispatchResult(ok=True, tool=tool_name, value=result)
 
     def handles_summary(self) -> str:

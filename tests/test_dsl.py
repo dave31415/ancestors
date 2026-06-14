@@ -163,6 +163,63 @@ def test_sort_by_surname_alphabetical(d):
     assert surnames == sorted(surnames, key=str.lower)
 
 
+def test_find_common_ancestor_for_known_pair(d):
+    # David and his father share the father — so the MRCA *is* his father,
+    # generations 1 and 0 — labelled "parent ↔ child".
+    fams = d.dispatch("get_parents_of", {"person_id": DAVID_ID})
+    parents_records = d.dispatch("get_individuals", {"ids": fams.set_handle, "limit": 2}).value
+    father_id = next(
+        ind["id"] for ind in parents_records if ind.get("sex") == "M"
+    )
+    r = d.dispatch(
+        "find_common_ancestor",
+        {"a_id": DAVID_ID, "b_id": father_id, "max_generations": 5},
+    )
+    assert r.ok
+    assert r.value["ancestor_id"] == father_id
+    assert r.value["generations_to_a"] == 1
+    assert r.value["generations_to_b"] == 0
+    assert "parent" in r.value["relationship_label"]
+
+
+def test_find_common_ancestor_returns_nulls_when_unrelated(d):
+    # Pick someone definitely not in David's tree: Thomas Playters (1359
+    # English, on the deep maternal side via the Cloptons). They DO share a
+    # gen-many ancestor, but limiting max_generations=2 forces no match.
+    everyone = d.dispatch("all_individuals", {})
+    earliest_set = d.dispatch(
+        "sort_by", {"ids": everyone.set_handle, "by": "birth_year", "limit": 1}
+    )
+    earliest_recs = d.dispatch(
+        "get_individuals", {"ids": earliest_set.set_handle, "limit": 1}
+    )
+    earliest_id = earliest_recs.value[0]["id"]
+    r = d.dispatch(
+        "find_common_ancestor",
+        {"a_id": DAVID_ID, "b_id": earliest_id, "max_generations": 2},
+    )
+    assert r.ok
+    assert r.value["ancestor_id"] is None
+    assert r.value["relationship_label"] is None
+
+
+def test_kinship_label_known_pairs():
+    from ancestors.dsl import _label_kinship
+
+    assert _label_kinship(0, 0) == "same individual"
+    assert "parent" in _label_kinship(1, 0)
+    assert "grandparent" in _label_kinship(2, 0)
+    assert "great-grandparent" in _label_kinship(3, 0)
+    assert "siblings" in _label_kinship(1, 1)
+    assert _label_kinship(2, 2) == "first cousins"
+    assert _label_kinship(3, 3) == "second cousins"
+    assert _label_kinship(4, 4) == "third cousins"
+    assert _label_kinship(2, 3) == "first cousins once removed"
+    assert _label_kinship(3, 5) == "second cousins twice removed"
+    assert "aunt/uncle" in _label_kinship(1, 2)
+    assert "great-aunt/uncle" in _label_kinship(1, 3)
+
+
 def test_sort_by_preserves_metadata():
     # Use a fresh dispatcher so the test is independent.
     from ancestors.dispatch import Dispatcher
