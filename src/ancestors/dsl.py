@@ -29,6 +29,7 @@ from ancestors.models import (
     Individual,
     IndividualQuery,
     Sex,
+    SortKey,
 )
 from ancestors.session import current_session
 from ancestors.tools.gaps import find_evidence_gaps
@@ -281,6 +282,69 @@ def filter_has_no_source(ids: IdSet, event_type: EventType) -> IdSet:
         if all(not ev.source_ids for ev in events):
             keep.append(ind.id)
     return _restrict(ids, keep)
+
+
+def sort_by(
+    ids: IdSet,
+    by: SortKey,
+    descending: bool = False,
+    limit: int | None = None,
+) -> IdSet:
+    """Order an IdSet by a typed key, optionally taking the top N.
+
+    Individuals missing the sort key (e.g. no birth date when sorting by
+    birth_year) are dropped from the result rather than scattered through
+    the order. Ties break by id so the result is deterministic.
+
+    The returned IdSet carries a `rank` metadata field per id (0-indexed in
+    sorted order) so downstream readers can describe positions.
+    """
+    items: list[tuple[str, int | float | str]] = []
+    for ind in _hydrate(ids):
+        key = _sort_key(ind, by)
+        if key is None:
+            continue
+        items.append((ind.id, key))
+
+    items.sort(key=lambda x: (x[1], x[0]), reverse=descending)
+    if limit is not None:
+        items = items[:limit]
+
+    ordered_ids = [iid for iid, _ in items]
+    metadata: dict[str, dict[str, object]] = {}
+    for rank, (iid, _) in enumerate(items):
+        # Preserve any provenance metadata already attached to this id and
+        # add the rank for this sort. Earlier-attached keys (e.g. generation
+        # from get_ancestors_of) survive.
+        existing = ids.metadata.get(iid, {})
+        metadata[iid] = {**existing, "rank": rank}
+    return IdSet(ids=ordered_ids, metadata=metadata)
+
+
+def _sort_key(ind: Individual, by: SortKey) -> int | str | None:
+    if by == SortKey.BIRTH_YEAR:
+        return ind.birth.date.year if ind.birth and ind.birth.date else None
+    if by == SortKey.DEATH_YEAR:
+        return ind.death.date.year if ind.death and ind.death.date else None
+    if by == SortKey.LIFESPAN:
+        b = ind.birth.date.year if ind.birth and ind.birth.date else None
+        d = ind.death.date.year if ind.death and ind.death.date else None
+        if b is None or d is None:
+            return None
+        return d - b
+    if by == SortKey.SURNAME:
+        return (
+            ind.primary_name.surname.lower()
+            if ind.primary_name and ind.primary_name.surname
+            else None
+        )
+    if by == SortKey.GIVEN_NAME:
+        return (
+            ind.primary_name.given.lower()
+            if ind.primary_name and ind.primary_name.given
+            else None
+        )
+    return None
 
 
 def filter_by_query(ids: IdSet, query: IndividualQuery) -> IdSet:

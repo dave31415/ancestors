@@ -106,3 +106,72 @@ def test_get_summary_for_peter(d):
 def test_evidence_gaps_for_peter_include_unsourced(d):
     r = d.dispatch("get_evidence_gaps", {"person_id": PETER_ID})
     assert r.ok and "birth_date_unsourced" in r.value
+
+
+def test_sort_by_birth_year_ascending_finds_earliest(d):
+    everyone = d.dispatch("all_individuals", {})
+    s = d.dispatch(
+        "sort_by",
+        {"ids": everyone.set_handle, "by": "birth_year", "limit": 1},
+    )
+    assert s.ok and s.set_size == 1
+    record = d.dispatch("get_individuals", {"ids": s.set_handle, "limit": 1})
+    earliest = record.value[0]
+    # Thomas /Playters/, born 1359 — the documented earliest birth in the corpus.
+    assert earliest["birth"]["date"]["year"] == 1359
+    assert "Playters" in earliest["names"][0]["full"]
+
+
+def test_sort_by_birth_year_descending_returns_latest(d):
+    everyone = d.dispatch("all_individuals", {})
+    s = d.dispatch(
+        "sort_by",
+        {
+            "ids": everyone.set_handle,
+            "by": "birth_year",
+            "descending": True,
+            "limit": 3,
+        },
+    )
+    assert s.ok and s.set_size == 3
+
+
+def test_sort_by_lifespan_drops_individuals_without_both_dates(d):
+    everyone = d.dispatch("all_individuals", {})
+    s = d.dispatch(
+        "sort_by", {"ids": everyone.set_handle, "by": "lifespan", "descending": True, "limit": 5},
+    )
+    assert s.ok
+    # All 5 must have both birth and death years available — the sort key
+    # is undefined otherwise, so they were dropped.
+    records = d.dispatch("get_individuals", {"ids": s.set_handle, "limit": 5})
+    for ind in records.value:
+        assert ind["birth"]["date"]["year"] is not None
+        assert ind["death"]["date"]["year"] is not None
+
+
+def test_sort_by_surname_alphabetical(d):
+    a = d.dispatch("get_ancestors_of", {"person_id": DAVID_ID, "max_generations": 2})
+    s = d.dispatch("sort_by", {"ids": a.set_handle, "by": "surname"})
+    assert s.ok
+    recs = d.dispatch("get_individuals", {"ids": s.set_handle, "limit": 25})
+    surnames = [
+        (ind.get("names", [{}])[0] or {}).get("surname")
+        for ind in recs.value
+    ]
+    surnames = [s for s in surnames if s]
+    assert surnames == sorted(surnames, key=str.lower)
+
+
+def test_sort_by_preserves_metadata():
+    # Use a fresh dispatcher so the test is independent.
+    from ancestors.dispatch import Dispatcher
+
+    d = Dispatcher()
+    a = d.dispatch("get_ancestors_of", {"person_id": DAVID_ID, "max_generations": 3})
+    # get_ancestors_of attaches generation metadata
+    s = d.dispatch("sort_by", {"ids": a.set_handle, "by": "birth_year"})
+    # Inspect the IdSet behind the handle: rank attached, generation preserved.
+    raw_set = d.sets[s.set_handle]
+    assert all("rank" in meta for meta in raw_set.metadata.values())
+    assert any("generation" in meta for meta in raw_set.metadata.values())

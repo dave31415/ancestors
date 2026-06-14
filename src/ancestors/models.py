@@ -200,6 +200,21 @@ class GapType(StrEnum):
     NO_EVENTS = "no_events"
 
 
+class SortKey(StrEnum):
+    """The key dimensions sort_by understands.
+
+    Adding a new key is a deliberate act — each one needs an extractor in
+    dsl.sort_by and a clear semantic (e.g. lifespan is death_year minus
+    birth_year and requires both to be present).
+    """
+
+    BIRTH_YEAR = "birth_year"
+    DEATH_YEAR = "death_year"
+    LIFESPAN = "lifespan"
+    SURNAME = "surname"
+    GIVEN_NAME = "given_name"
+
+
 class EvidenceGap(BaseModel):
     """A documented hole in the evidence for an individual.
 

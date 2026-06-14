@@ -40,6 +40,7 @@ from ancestors.models import (
     IdSet,
     Individual,
     Sex,
+    SortKey,
     ToolError,
 )
 
@@ -147,6 +148,14 @@ class _GroupBy(BaseModel):
     by: Annotated[str, StringConstraints(pattern=r"^(generation|birth_century|birth_country|sex)$")]
 
 
+class _SortBy(BaseModel):
+    model_config = {"extra": "forbid"}
+    ids: SetHandle
+    by: SortKey
+    descending: bool = False
+    limit: Annotated[int, Field(ge=1, le=MAX_HYDRATION_LIMIT)] | None = None
+
+
 # ---------------------------------------------------------------------------
 # Registry — the whitelist. Only tools listed here are dispatchable.
 # ---------------------------------------------------------------------------
@@ -195,6 +204,8 @@ TOOLS: dict[str, Tool] = {
              "Keep ids with at least one event of type T in the given year range."),
         Tool("filter_has_no_source", _FilterEventTypeOnly, dsl.filter_has_no_source,
              "Keep ids whose event of type T exists but has no source citation."),
+        Tool("sort_by", _SortBy, dsl.sort_by,
+             "Order an IdSet by birth_year/death_year/lifespan/surname/given_name, optionally taking the top N. Missing values drop from the result."),
         Tool("count", _SetOnly, dsl.count,
              "Return the size of an IdSet."),
         Tool("group_by", _GroupBy, dsl.group_by,
