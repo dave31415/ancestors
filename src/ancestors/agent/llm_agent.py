@@ -40,7 +40,7 @@ from ancestors.agent.state import (
     Hypothesis,
     ResearchState,
 )
-from ancestors.dispatch import DispatchResult
+from ancestors.dispatch import DispatchResult, Dispatcher
 from ancestors.llm import CachedAnthropic
 
 log = logging.getLogger(__name__)
@@ -135,6 +135,11 @@ class LlmAgent:
     system_prompt: str
     dsl_tool_defs: list[dict[str, Any]]
     model: str | None = None
+    # Optional. When provided, PLAN/ASSESS prompts include a summary of
+    # the current IdSet handles so the model reuses h_1 rather than calling
+    # the same producer again. Combined with dispatcher memoization, this is
+    # the load-bearing fix for the repeat-call pathology.
+    dispatcher: Dispatcher | None = None
 
     # ---- Planner ----
 
@@ -172,10 +177,11 @@ class LlmAgent:
         return (
             f"Research question: {question}\n\n"
             f"Current research state:\n{state.summary()}\n\n"
+            f"{self._handles_block()}"
             "Plan the next concrete step toward answering. Call the tools "
             "you need — each call must move the investigation forward. "
-            "Do NOT re-call tools you have already invoked with the same "
-            "arguments; the loop will catch that as a stall and terminate. "
+            "Reuse existing handles when they fit; do NOT re-call a "
+            "producer if the handle you need is already listed above. "
             "Aim for 1–4 tool calls. If the prior turn's results already "
             "contain the answer, emit no tool calls so the assessor can "
             "produce the answer directly."
@@ -191,6 +197,7 @@ class LlmAgent:
         return (
             f"Research question: {question}\n\n"
             f"Current research state:\n{state.summary()}\n\n"
+            f"{self._handles_block()}"
             f"Results from your last batch of tool calls:\n{results_text}\n\n"
             "Now produce a structured assessment via `submit_assessment`. "
             "Specifically:\n\n"
@@ -211,6 +218,19 @@ class LlmAgent:
             "from the system prompt. Unsupported claims should be hypotheses, "
             "not facts."
         )
+
+    def _handles_block(self) -> str:
+        """Render the dispatcher's handle inventory for inclusion in prompts.
+
+        Empty string when no dispatcher is attached or no handles exist —
+        keeps the prompt clean when there's nothing to say.
+        """
+        if self.dispatcher is None:
+            return ""
+        summary = self.dispatcher.handles_summary()
+        if "no IdSet handles" in summary:
+            return ""
+        return f"Known IdSet handles in this session:\n{summary}\n\n"
 
     def _format_results(self, results: list[DispatchResult]) -> str:
         """A model-readable summary of dispatch results.

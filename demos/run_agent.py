@@ -80,6 +80,7 @@ def main(question: str = DEFAULT_QUESTION) -> None:
         llm=llm,
         system_prompt=build_system_prompt(db),
         dsl_tool_defs=export_tools_for_anthropic(),
+        dispatcher=dispatcher,
     )
     loop = AgentLoop(
         planner=agent.plan,

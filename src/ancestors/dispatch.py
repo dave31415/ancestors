@@ -23,6 +23,7 @@ or `error`.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
@@ -242,6 +243,10 @@ class Dispatcher:
     call_count: int = 0
     hooks: HookRegistry | None = None
     _next_handle: int = 1
+    _memo: dict[str, DispatchResult] = field(default_factory=dict)
+    # Provenance: handle -> (tool_name, args_dict). Used by handles_summary()
+    # so the agent's prompt can show what each handle represents.
+    _handle_provenance: dict[str, tuple[str, dict]] = field(default_factory=dict)
 
     def dispatch(self, tool_name: str, args: dict[str, Any]) -> DispatchResult:
         start = time.time()
@@ -281,62 +286,94 @@ class Dispatcher:
             )
         self.call_count += 1
 
+        # Memoization: identical (tool, args) returns the prior result
+        # rather than dispatching again. Cheap, deterministic, and prevents
+        # the wasted-call class of agent friction at the source. Counted
+        # toward the call budget so the dispatcher cap still bites if an
+        # agent loops; the stall detector at the loop level still bites too.
+        memo_key = _memo_key(tool_name, args)
+        cached = self._memo.get(memo_key)
+        if cached is not None:
+            return cached
+
         tool = TOOLS.get(tool_name)
         if tool is None:
-            return DispatchResult(
-                ok=False,
-                tool=tool_name,
-                error=ToolError(
-                    code="unknown_tool",
-                    message=f"Tool {tool_name!r} is not registered.",
+            return self._cache_and_return(
+                memo_key,
+                DispatchResult(
+                    ok=False,
+                    tool=tool_name,
+                    error=ToolError(
+                        code="unknown_tool",
+                        message=f"Tool {tool_name!r} is not registered.",
+                    ),
                 ),
             )
 
         try:
             validated = tool.args_model.model_validate(args)
         except ValidationError as exc:
-            return DispatchResult(
-                ok=False,
-                tool=tool_name,
-                error=ToolError(
-                    code="invalid_arguments",
-                    message="Arguments failed schema validation.",
-                    detail={"errors": exc.errors(include_url=False)},
+            return self._cache_and_return(
+                memo_key,
+                DispatchResult(
+                    ok=False,
+                    tool=tool_name,
+                    error=ToolError(
+                        code="invalid_arguments",
+                        message=_format_validation_errors(exc, tool.args_model),
+                        detail={"errors": exc.errors(include_url=False)},
+                    ),
                 ),
             )
 
         try:
             kwargs = self._resolve_args(validated)
         except KeyError as exc:
-            return DispatchResult(
-                ok=False,
-                tool=tool_name,
-                error=ToolError(
-                    code="unknown_set_handle",
-                    message=f"Set handle {exc.args[0]!r} not known in this session.",
+            return self._cache_and_return(
+                memo_key,
+                DispatchResult(
+                    ok=False,
+                    tool=tool_name,
+                    error=ToolError(
+                        code="unknown_set_handle",
+                        message=f"Set handle {exc.args[0]!r} not known in this session.",
+                    ),
                 ),
             )
         except ValueError as exc:
-            return DispatchResult(
-                ok=False,
-                tool=tool_name,
-                error=ToolError(code="input_too_large", message=str(exc)),
+            return self._cache_and_return(
+                memo_key,
+                DispatchResult(
+                    ok=False,
+                    tool=tool_name,
+                    error=ToolError(code="input_too_large", message=str(exc)),
+                ),
             )
 
         try:
             result = tool.fn(**kwargs)
         except Exception as exc:  # noqa: BLE001 — converted to structured error
             log.exception("Tool %s raised an unexpected exception", tool_name)
-            return DispatchResult(
-                ok=False,
-                tool=tool_name,
-                error=ToolError(
-                    code="tool_exception",
-                    message=f"{type(exc).__name__}: {exc}",
+            return self._cache_and_return(
+                memo_key,
+                DispatchResult(
+                    ok=False,
+                    tool=tool_name,
+                    error=ToolError(
+                        code="tool_exception",
+                        message=f"{type(exc).__name__}: {exc}",
+                    ),
                 ),
             )
 
-        return self._envelope(tool_name, result)
+        envelope = self._envelope(tool_name, args, result)
+        return self._cache_and_return(memo_key, envelope)
+
+    def _cache_and_return(
+        self, memo_key: str, result: DispatchResult
+    ) -> DispatchResult:
+        self._memo[memo_key] = result
+        return result
 
     def get_set(self, handle: str) -> IdSet:
         """Internal accessor used by demo code; never exposed to agents."""
@@ -364,7 +401,9 @@ class Dispatcher:
                 kwargs[name] = value
         return kwargs
 
-    def _envelope(self, tool_name: str, result: Any) -> DispatchResult:
+    def _envelope(
+        self, tool_name: str, args: dict[str, Any], result: Any
+    ) -> DispatchResult:
         if isinstance(result, IdSet):
             if result.size > MAX_RESULT_SET_SIZE:
                 return DispatchResult(
@@ -378,6 +417,7 @@ class Dispatcher:
             handle = f"h_{self._next_handle}"
             self._next_handle += 1
             self.sets[handle] = result
+            self._handle_provenance[handle] = (tool_name, dict(args))
             return DispatchResult(
                 ok=True, tool=tool_name, set_handle=handle, set_size=result.size
             )
@@ -391,6 +431,23 @@ class Dispatcher:
             )
         return DispatchResult(ok=True, tool=tool_name, value=result)
 
+    def handles_summary(self) -> str:
+        """A compact rendering of every IdSet handle currently in the session.
+
+        Goes into the agent's prompt at PLAN/ASSESS time so the model can
+        reuse handles it has already produced instead of re-creating them.
+        Combined with memoization, this is the load-bearing fix for the
+        repeat-call pathology we observed.
+        """
+        if not self._handle_provenance:
+            return "(no IdSet handles in this session yet)"
+        lines: list[str] = []
+        for handle, (tool, args) in self._handle_provenance.items():
+            size = self.sets[handle].size if handle in self.sets else "?"
+            args_str = _short_args(args)
+            lines.append(f"  {handle} (size {size}) ← {tool}({args_str})")
+        return "\n".join(lines)
+
 
 def list_tools() -> list[dict[str, str]]:
     """Schema-level introspection — what the agent would be told it can do."""
@@ -402,6 +459,86 @@ def list_tools() -> list[dict[str, str]]:
         }
         for t in TOOLS.values()
     ]
+
+
+def _memo_key(tool_name: str, args: dict[str, Any]) -> str:
+    """Canonical dispatch key. Same tool + same args → same string."""
+    return f"{tool_name}:{json.dumps(args, sort_keys=True, default=str)}"
+
+
+def _short_args(args: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for k, v in args.items():
+        s = json.dumps(v, default=str)
+        if len(s) > 40:
+            s = s[:37] + "…"
+        parts.append(f"{k}={s}")
+    return ", ".join(parts)
+
+
+def _format_validation_errors(
+    exc: ValidationError, args_model: type[BaseModel]
+) -> str:
+    """Render a Pydantic validation error as one actionable sentence.
+
+    The default Pydantic message lists each error with type tags that aren't
+    very model-readable. Here we name the field, the problem, and (for
+    enums and literals) the allowed values, so the agent can usually fix
+    its call on the next turn rather than guessing.
+    """
+    schema = args_model.model_json_schema()
+    props = schema.get("properties", {})
+    defs = schema.get("$defs", {})
+    required = set(schema.get("required", []))
+
+    def field_schema(field_name: str) -> dict[str, Any]:
+        node = props.get(field_name, {})
+        if "$ref" in node and node["$ref"].startswith("#/$defs/"):
+            return defs.get(node["$ref"].split("/")[-1], node)
+        return node
+
+    fragments: list[str] = []
+    for err in exc.errors(include_url=False):
+        loc = ".".join(str(p) for p in err.get("loc", ())) or "(root)"
+        etype = err.get("type", "")
+        msg = err.get("msg", "validation failed")
+        ctx = err.get("ctx") or {}
+
+        if etype == "missing":
+            allowed = field_schema(loc).get("enum")
+            if allowed:
+                fragments.append(
+                    f"required field {loc!r} is missing — must be one of {allowed}"
+                )
+            else:
+                fragments.append(f"required field {loc!r} is missing")
+        elif etype in {"literal_error", "enum"}:
+            expected = ctx.get("expected") or field_schema(loc).get("enum")
+            fragments.append(
+                f"field {loc!r}: invalid value; must be one of {expected}"
+            )
+        elif etype == "string_pattern_mismatch":
+            pattern = ctx.get("pattern", "?")
+            fragments.append(
+                f"field {loc!r}: {msg} (pattern {pattern})"
+            )
+        elif etype.startswith("string_too_"):
+            limit = ctx.get("max_length") or ctx.get("min_length")
+            fragments.append(f"field {loc!r}: {msg} (limit {limit})")
+        elif etype in {"greater_than_equal", "less_than_equal", "greater_than", "less_than"}:
+            fragments.append(f"field {loc!r}: {msg}")
+        elif loc == "(root)" and etype == "extra_forbidden":
+            fragments.append(
+                f"unexpected field passed to this tool"
+            )
+        else:
+            fragments.append(f"field {loc!r}: {msg}")
+
+    body = "; ".join(fragments) if fragments else "validation failed"
+    hint = ""
+    if required:
+        hint = f"  (this tool requires: {sorted(required)})"
+    return f"{body}.{hint}".strip()
 
 
 def _summarize_result(result: DispatchResult) -> dict[str, Any]:
