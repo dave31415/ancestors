@@ -1,4 +1,17 @@
-# Genealogy Research Agent — CLAUDE.md
+# Genealogy Research Agent — Origin Spec
+
+> **Status:** historical. This is the originating design document; the project's
+> current direction has evolved beyond it through conversation and code. The
+> authoritative state of the system is the code in `src/ancestors/` and the
+> tests in `tests/`.
+>
+> Kept here for: (1) the reasoning patterns used in the agent's system prompt,
+> (2) the domain anchors (Peter Gallagher, Dr. Lancelot Johnston) that underpin
+> tests and evaluation questions, (3) the "what good output looks like" rubric.
+>
+> Treat specific tool names, stage numbers, and architectural choices in this
+> doc as *the initial intent*, not the current shape. Where the code disagrees
+> with this doc, the code is right.
 
 ## Project Purpose
 
