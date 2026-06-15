@@ -28,7 +28,13 @@ from pydantic import BaseModel, Field
 
 
 class ConfidenceLevel(StrEnum):
-    """Genealogical Proof Standard confidence vocabulary, ordered."""
+    """Ordered confidence vocabulary used by the agent's working memory.
+
+    Generic four-level ladder (with REFUTED as an off-axis sentinel for
+    actively-disproved claims). Any investigation agent can use it; the
+    genealogy prompt happens to map these onto the Genealogical Proof
+    Standard, but the enum itself isn't domain-specific.
+    """
 
     CONFIRMED = "confirmed"
     PROBABLE = "probable"

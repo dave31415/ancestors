@@ -43,6 +43,7 @@ from ancestors.agent.state import (
 )
 from ancestors.dispatch import DispatchResult, Dispatcher
 from ancestors.llm import CachedAnthropic
+from ancestors.models import format_individual_record, looks_like_individual_record
 
 log = logging.getLogger(__name__)
 
@@ -372,9 +373,10 @@ def _strip_embedded_xml_fields(input_dict: dict[str, Any]) -> dict[str, Any]:
 def _format_value(value: Any, indent: str = "") -> str:
     """Render a tool result value as model-readable text.
 
-    Lists of Individual-shaped records are special-cased to highlight the
-    fields most useful for the agent's downstream reasoning. Other values
-    fall through to JSON, with note fields truncated.
+    Lists of domain-shaped records (currently: Individual) are routed to
+    the domain's record formatter so the agent sees structured fields
+    rather than a JSON dump. Other values fall through to JSON, with note
+    fields truncated.
     """
     if value is None:
         return f"{indent}(null)"
@@ -384,55 +386,14 @@ def _format_value(value: Any, indent: str = "") -> str:
     if isinstance(value, list):
         if not value:
             return f"{indent}(empty list)"
-        # Heuristic: if the first element looks like an Individual record
-        # (has id + names), render each one compactly.
-        if isinstance(value[0], dict) and "id" in value[0] and "names" in value[0]:
+        if looks_like_individual_record(value[0]):
             return "\n".join(
-                _format_individual(ind, indent) for ind in value
+                format_individual_record(ind, indent) for ind in value
             )
-        # Otherwise dump JSON with truncation.
         return _truncate(json.dumps(value, indent=2, default=str), indent)
     if isinstance(value, dict):
         return _truncate(json.dumps(value, indent=2, default=str), indent)
     return f"{indent}{type(value).__name__}"
-
-
-def _format_individual(ind: dict[str, Any], indent: str) -> str:
-    """One-shot rendering of an Individual record for the model.
-
-    Surfaces id, primary name, sex, birth/death/burial dates and places,
-    family links, and source ids. Notes are truncated hard — the model can
-    request a specific note via a future tool if it ever needs to.
-    """
-    name = "?"
-    if ind.get("names"):
-        name = ind["names"][0].get("full") or "?"
-    parts = [f"{indent}- id={ind.get('id')!r} name={name!r} sex={ind.get('sex')}"]
-    for ev_key in ("birth", "death", "burial"):
-        ev = ind.get(ev_key)
-        if not ev:
-            continue
-        date = (ev.get("date") or {}).get("raw")
-        place = ev.get("place") or {}
-        place_str = " / ".join(
-            p for p in (place.get("city"), place.get("state"), place.get("country"), place.get("raw"))
-            if p
-        )
-        sources = ev.get("source_ids") or []
-        line = f"{indent}    {ev_key}: date={date!r} place={place_str!r}"
-        if sources:
-            line += f" sources={sources}"
-        parts.append(line)
-    if ind.get("families_as_child"):
-        parts.append(f"{indent}    families_as_child={ind['families_as_child']}")
-    if ind.get("families_as_spouse"):
-        parts.append(f"{indent}    families_as_spouse={ind['families_as_spouse']}")
-    notes = ind.get("notes") or []
-    if notes:
-        first = (notes[0] or "")[:200]
-        more = f" (+{len(notes) - 1} more)" if len(notes) > 1 else ""
-        parts.append(f"{indent}    notes: {first!r}{more}")
-    return "\n".join(parts)
 
 
 def _truncate(text: str, indent: str, max_chars: int = 2000) -> str:

@@ -23,7 +23,7 @@ from ancestors.agent.observability import (
     JsonlTraceWriter,
     TraceEvent,
 )
-from ancestors.agent.prompts import build_system_prompt
+from ancestors.genealogy_prompts import build_system_prompt
 from ancestors.agent.schema import export_tools_for_anthropic
 from ancestors.dispatch import Dispatcher
 from ancestors.llm import CachedAnthropic

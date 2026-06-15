@@ -1,4 +1,10 @@
-"""System prompt builder.
+"""Genealogy system prompt builder.
+
+Lives at the top level (not under agent/) because the prompt itself is
+domain content: it names the genealogy tool families, describes the
+Genealogical Proof Standard, and embeds the SQLite schema. The generic
+agent loop in agent/ doesn't import this file — only the GedcomCorpus
+adapter does, when assembling the per-session prompt.
 
 The prompt is built at session start from a template plus injected facts:
 - a compact corpus summary (counts, year range, top surnames),

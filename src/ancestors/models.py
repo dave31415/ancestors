@@ -281,3 +281,67 @@ class ToolError(BaseModel):
     code: str
     message: str
     detail: dict[str, object] = Field(default_factory=dict)
+
+
+def format_individual_record(ind: dict[str, object], indent: str = "") -> str:
+    """Render an Individual-shaped dict as model-readable text.
+
+    Lives here (next to the Individual model) because the formatting is
+    genealogy-specific: it knows what fields the dict has, which events
+    matter, and how to surface family links. The generic tool-result
+    formatter in agent/llm_agent.py calls this for any value whose first
+    element looks Individual-shaped.
+
+    Operates on a dict rather than an Individual instance because by the
+    time the formatter sees it, the value has already been JSON-serialised
+    on its way back from the dispatcher.
+    """
+    name = "?"
+    names = ind.get("names")
+    if isinstance(names, list) and names:
+        first = names[0]
+        if isinstance(first, dict):
+            name = first.get("full") or "?"
+    parts = [f"{indent}- id={ind.get('id')!r} name={name!r} sex={ind.get('sex')}"]
+    for ev_key in ("birth", "death", "burial"):
+        ev = ind.get(ev_key)
+        if not isinstance(ev, dict):
+            continue
+        date_raw = None
+        date = ev.get("date")
+        if isinstance(date, dict):
+            date_raw = date.get("raw")
+        place = ev.get("place") if isinstance(ev.get("place"), dict) else {}
+        place_str = " / ".join(
+            p for p in (
+                place.get("city"),
+                place.get("state"),
+                place.get("country"),
+                place.get("raw"),
+            ) if p
+        )
+        sources = ev.get("source_ids") or []
+        line = f"{indent}    {ev_key}: date={date_raw!r} place={place_str!r}"
+        if sources:
+            line += f" sources={sources}"
+        parts.append(line)
+    if ind.get("families_as_child"):
+        parts.append(f"{indent}    families_as_child={ind['families_as_child']}")
+    if ind.get("families_as_spouse"):
+        parts.append(f"{indent}    families_as_spouse={ind['families_as_spouse']}")
+    notes = ind.get("notes") or []
+    if isinstance(notes, list) and notes:
+        first = (notes[0] or "")[:200] if isinstance(notes[0], str) else ""
+        more = f" (+{len(notes) - 1} more)" if len(notes) > 1 else ""
+        parts.append(f"{indent}    notes: {first!r}{more}")
+    return "\n".join(parts)
+
+
+def looks_like_individual_record(value: object) -> bool:
+    """Heuristic — does this dict look like a serialised Individual?
+
+    Used by the generic tool-result formatter to decide whether to delegate
+    to format_individual_record. Pulled into the domain module so the
+    agent code doesn't hard-code the field names "id" and "names".
+    """
+    return isinstance(value, dict) and "id" in value and "names" in value
