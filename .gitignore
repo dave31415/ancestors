@@ -222,3 +222,6 @@ __marimo__/
 # Agent traces — session-specific, often large
 traces/
 
+# IDE / editor local config
+.idea/
+
