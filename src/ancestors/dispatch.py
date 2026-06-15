@@ -28,6 +28,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Annotated, Any, Callable
 
 from pydantic import BaseModel, Field, StringConstraints, ValidationError
@@ -36,9 +37,7 @@ from ancestors import dsl
 from ancestors.agent.observability import HookRegistry
 from ancestors.models import (
     EventType,
-    GapType,
     IdSet,
-    Individual,
     Sex,
     SortKey,
     ToolError,
@@ -460,14 +459,19 @@ class Dispatcher:
             return DispatchResult(
                 ok=True, tool=tool_name, set_handle=handle, set_size=result.size
             )
-        if isinstance(result, list) and result and isinstance(result[0], Individual):
-            return DispatchResult(
-                ok=True, tool=tool_name, value=[ind.model_dump() for ind in result]
-            )
-        if isinstance(result, list) and result and isinstance(result[0], GapType):
-            return DispatchResult(
-                ok=True, tool=tool_name, value=[g.value for g in result]
-            )
+        if isinstance(result, list) and result:
+            if isinstance(result[0], BaseModel):
+                return DispatchResult(
+                    ok=True,
+                    tool=tool_name,
+                    value=[m.model_dump() for m in result],
+                )
+            if isinstance(result[0], Enum):
+                return DispatchResult(
+                    ok=True,
+                    tool=tool_name,
+                    value=[e.value for e in result],
+                )
         if isinstance(result, BaseModel):
             # Any structured Pydantic result (CommonAncestorResult, future
             # scalar-shaped tools) is rendered to a dict the LLM can read.
