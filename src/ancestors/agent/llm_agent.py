@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -292,6 +293,10 @@ class LlmAgent:
 
 
 def _assessment_from_input(input_dict: dict[str, Any]) -> Assessment:
+    # Defensive against a Claude regression where the model writes
+    # XML-style tags inside the JSON string values of tool input. See
+    # _strip_embedded_xml_fields for details.
+    input_dict = _strip_embedded_xml_fields(input_dict)
     try:
         parsed = SubmitAssessmentInput.model_validate(input_dict)
     except ValidationError as exc:
@@ -310,6 +315,58 @@ def _assessment_from_input(input_dict: dict[str, Any]) -> Assessment:
         stuck_reason=parsed.stuck_reason,
         reasoning=parsed.reasoning,
     )
+
+
+# Regex matches a trailing fragment like:
+#   </field_name>\n<parameter name="next_field">next_value
+# possibly followed by another such pair, with optional closing </parameter>.
+_XML_LEAK_RE = re.compile(
+    r"</(?P<this_field>[a-zA-Z_]\w*)>\s*"
+    r"(?:<parameter\s+name=\"(?P<next_field>[a-zA-Z_]\w*)\">)?"
+    r"(?P<next_value>.*?)"
+    r"(?:</parameter>)?\s*$",
+    re.DOTALL,
+)
+
+
+def _strip_embedded_xml_fields(input_dict: dict[str, Any]) -> dict[str, Any]:
+    """Recover from Claude's occasional XML-tag-in-JSON leak.
+
+    The submit_assessment tool expects a JSON object whose fields are
+    populated as separate keys. Occasionally the model regresses to the
+    XML-tagged tool-use idiom and writes:
+
+        answer_text = "...real answer.</answer_text>
+                       <parameter name=\"answer_confidence\">probable"
+
+    leaving the actual answer_confidence field unset. This helper detects
+    the trailing tags, trims them from the originating field, and copies
+    the embedded values into their intended fields. Iterates until no
+    embedded fields remain so chained leaks ("answer_text → confidence →
+    stuck_reason → …") all get rescued.
+    """
+    cleaned = dict(input_dict)
+    text_fields = ("answer_text", "stuck_reason", "reasoning")
+    changed = True
+    while changed:
+        changed = False
+        for field_name in text_fields:
+            value = cleaned.get(field_name)
+            if not isinstance(value, str):
+                continue
+            match = _XML_LEAK_RE.search(value)
+            if not match or match.group("this_field") != field_name:
+                continue
+            cleaned[field_name] = value[: match.start()].rstrip()
+            next_field = match.group("next_field")
+            next_value = (match.group("next_value") or "").strip()
+            if next_field and next_value and next_field not in cleaned:
+                cleaned[next_field] = next_value
+                changed = True
+            elif not next_field:
+                # Trailing close tag with no follow-on field — done.
+                changed = True
+    return cleaned
 
 
 def _format_value(value: Any, indent: str = "") -> str:

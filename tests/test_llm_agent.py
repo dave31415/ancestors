@@ -212,3 +212,61 @@ def test_submit_assessment_input_accepts_minimal_continue():
     parsed = SubmitAssessmentInput.model_validate({"decision": "continue"})
     assert parsed.decision == "continue"
     assert parsed.new_facts == []
+
+
+def test_assess_recovers_xml_tag_leakage_in_answer_text(agent):
+    """Real failure mode observed in the wild — see commit log.
+
+    The model wrote answer_confidence inline as an XML tag inside answer_text,
+    leaving the actual answer_confidence field None. Our parser recovers.
+    """
+    a, client = agent
+    leaked_text = (
+        'Peter Gallagher is the great-great-grandfather of David Edmund Johnston.'
+        '</answer_text>\n<parameter name="answer_confidence">probable'
+    )
+    client.messages.create.return_value = _msg(
+        [
+            _tool_use(
+                "submit_assessment",
+                {
+                    "decision": "answer",
+                    "reasoning": "MRCA found at gen 4 from David, 0 from Peter.",
+                    "answer_text": leaked_text,
+                    # answer_confidence not set — it's leaked into answer_text.
+                },
+            )
+        ]
+    )
+    assessment = a.assess("How are they related?", new_state("?"), [])
+    assert assessment.decision == "answer"
+    # The XML tags were stripped from answer_text.
+    assert "</answer_text>" not in (assessment.answer_text or "")
+    assert "<parameter" not in (assessment.answer_text or "")
+    assert assessment.answer_text.endswith("David Edmund Johnston.")
+    # The recovered field landed in answer_confidence.
+    assert assessment.answer_confidence == ConfidenceLevel.PROBABLE
+
+
+def test_assess_handles_xml_leak_with_closing_parameter_tag(agent):
+    """Same shape but with a closing </parameter> tag — must still recover."""
+    a, client = agent
+    leaked_text = (
+        "We're stuck because the corpus is incomplete."
+        '</stuck_reason>\n<parameter name="reasoning">tried both surnames</parameter>'
+    )
+    client.messages.create.return_value = _msg(
+        [
+            _tool_use(
+                "submit_assessment",
+                {
+                    "decision": "stuck",
+                    "stuck_reason": leaked_text,
+                },
+            )
+        ]
+    )
+    assessment = a.assess("?", new_state("?"), [])
+    assert assessment.decision == "stuck"
+    assert "</stuck_reason>" not in (assessment.stuck_reason or "")
+    assert assessment.reasoning == "tried both surnames"
