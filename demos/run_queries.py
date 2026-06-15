@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ancestors.dispatch import Dispatcher
 from ancestors.session import bind_session
+from ancestors.tool_registry import TOOLS
 from ancestors.tools.gedcom import load_gedcom
 
 GEDCOM_PATH = Path(__file__).resolve().parent.parent / "data" / "export-Ancestors.ged"
@@ -44,7 +45,7 @@ def heading(title: str) -> None:
 
 def main() -> None:
     bind_session(load_gedcom(GEDCOM_PATH))
-    d = Dispatcher()
+    d = Dispatcher(tools=TOOLS)
 
     # -----------------------------------------------------------------------
     # Q1: Did any of David's ancestors come from England?

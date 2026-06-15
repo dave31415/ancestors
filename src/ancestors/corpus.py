@@ -11,10 +11,12 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-from ancestors.genealogy_prompts import build_system_prompt
 from ancestors.agent.schema import export_tools_for_anthropic
+from ancestors.dispatch import Tool
+from ancestors.genealogy_prompts import build_system_prompt
 from ancestors.models import GedcomDatabase
 from ancestors.session import bind_session, clear_session
+from ancestors.tool_registry import TOOLS
 from ancestors.tools.gedcom import load_gedcom
 
 
@@ -41,5 +43,8 @@ class GedcomCorpus:
     def system_prompt(self) -> str:
         return build_system_prompt(self.db)
 
+    def tools(self) -> dict[str, Tool]:
+        return TOOLS
+
     def tool_defs(self) -> list[dict[str, Any]]:
-        return export_tools_for_anthropic()
+        return export_tools_for_anthropic(TOOLS)

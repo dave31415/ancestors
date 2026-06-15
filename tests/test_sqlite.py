@@ -19,6 +19,7 @@ import pytest
 from ancestors.dispatch import Dispatcher
 from ancestors.session import bind_session, clear_session, current_session
 from ancestors.sqlite_store import MAX_ROWS, build_sqlite_for_session
+from ancestors.tool_registry import TOOLS
 from ancestors.tools.gedcom import load_gedcom
 
 GEDCOM_PATH = Path(__file__).parent.parent / "data" / "export-Ancestors.ged"
@@ -39,7 +40,7 @@ def session(db):
 
 @pytest.fixture
 def disp():
-    return Dispatcher()
+    return Dispatcher(tools=TOOLS)
 
 
 # ---------------------------------------------------------------------------

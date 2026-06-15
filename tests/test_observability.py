@@ -18,6 +18,7 @@ from ancestors.agent.observability import (
 )
 from ancestors.dispatch import Dispatcher
 from ancestors.session import bind_session, clear_session
+from ancestors.tool_registry import TOOLS
 from ancestors.tools.gedcom import load_gedcom
 
 GEDCOM_PATH = Path(__file__).parent.parent / "data" / "export-Ancestors.ged"
@@ -36,7 +37,7 @@ def dispatcher_with_collector():
     events, observer = make_collector()
     hooks = HookRegistry()
     hooks.subscribe(observer)
-    return Dispatcher(hooks=hooks), events
+    return Dispatcher(tools=TOOLS, hooks=hooks), events
 
 
 def test_successful_call_emits_before_and_after(dispatcher_with_collector):
@@ -69,7 +70,7 @@ def test_observer_exception_does_not_break_dispatch(dispatcher_with_collector):
 
 
 def test_no_hooks_still_dispatches():
-    d = Dispatcher()  # no hooks attached
+    d = Dispatcher(tools=TOOLS)  # no hooks attached
     result = d.dispatch("all_individuals", {})
     assert result.ok is True
 
@@ -78,7 +79,7 @@ def test_jsonl_writer_creates_file(tmp_path: Path):
     writer = JsonlTraceWriter(trace_dir=tmp_path)
     hooks = HookRegistry()
     hooks.subscribe(writer)
-    d = Dispatcher(hooks=hooks)
+    d = Dispatcher(tools=TOOLS, hooks=hooks)
     d.dispatch("all_individuals", {})
     files = list(tmp_path.glob("*.jsonl"))
     assert len(files) == 1

@@ -15,6 +15,8 @@ from __future__ import annotations
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
+from ancestors.dispatch import Tool
+
 
 class Corpus(Protocol):
     """A domain's data + prompt + tools, packaged for the eval runner."""
@@ -32,6 +34,10 @@ class Corpus(Protocol):
 
     def system_prompt(self) -> str:
         """The fully-rendered system prompt for this corpus."""
+        ...
+
+    def tools(self) -> dict[str, Tool]:
+        """The Tool registry the Dispatcher will dispatch from."""
         ...
 
     def tool_defs(self) -> list[dict[str, Any]]:

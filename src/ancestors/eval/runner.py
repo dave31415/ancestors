@@ -30,7 +30,7 @@ def run_case(
         events, observer = make_collector()
         hooks = HookRegistry()
         hooks.subscribe(observer)
-        dispatcher = Dispatcher(hooks=hooks)
+        dispatcher = Dispatcher(tools=corpus.tools(), hooks=hooks)
         agent = LlmAgent(
             llm=llm,
             system_prompt=corpus.system_prompt(),

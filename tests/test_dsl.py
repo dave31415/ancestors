@@ -13,6 +13,7 @@ import pytest
 
 from ancestors.dispatch import Dispatcher
 from ancestors.session import bind_session, clear_session
+from ancestors.tool_registry import TOOLS
 from ancestors.tools.gedcom import load_gedcom
 
 GEDCOM_PATH = Path(__file__).parent.parent / "data" / "export-Ancestors.ged"
@@ -29,7 +30,7 @@ def session():
 
 @pytest.fixture
 def d():
-    return Dispatcher()
+    return Dispatcher(tools=TOOLS)
 
 
 def test_all_individuals_returns_full_population(d):
@@ -224,7 +225,7 @@ def test_sort_by_preserves_metadata():
     # Use a fresh dispatcher so the test is independent.
     from ancestors.dispatch import Dispatcher
 
-    d = Dispatcher()
+    d = Dispatcher(tools=TOOLS)
     a = d.dispatch("get_ancestors_of", {"person_id": DAVID_ID, "max_generations": 3})
     # get_ancestors_of attaches generation metadata
     s = d.dispatch("sort_by", {"ids": a.set_handle, "by": "birth_year"})

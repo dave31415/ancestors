@@ -23,11 +23,12 @@ from ancestors.agent.observability import (
     JsonlTraceWriter,
     TraceEvent,
 )
-from ancestors.genealogy_prompts import build_system_prompt
 from ancestors.agent.schema import export_tools_for_anthropic
 from ancestors.dispatch import Dispatcher
+from ancestors.genealogy_prompts import build_system_prompt
 from ancestors.llm import CachedAnthropic
 from ancestors.session import bind_session
+from ancestors.tool_registry import TOOLS
 from ancestors.tools.gedcom import load_gedcom
 
 GEDCOM_PATH = Path(__file__).resolve().parent.parent / "data" / "export-Ancestors.ged"
@@ -74,12 +75,12 @@ def main(question: str = DEFAULT_QUESTION) -> None:
     hooks.subscribe(print_event)
     hooks.subscribe(JsonlTraceWriter())
 
-    dispatcher = Dispatcher(hooks=hooks)
+    dispatcher = Dispatcher(tools=TOOLS, hooks=hooks)
     llm = CachedAnthropic()
     agent = LlmAgent(
         llm=llm,
         system_prompt=build_system_prompt(db),
-        dsl_tool_defs=export_tools_for_anthropic(),
+        dsl_tool_defs=export_tools_for_anthropic(TOOLS),
         dispatcher=dispatcher,
     )
     loop = AgentLoop(

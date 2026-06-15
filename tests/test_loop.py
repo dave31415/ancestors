@@ -41,6 +41,7 @@ from ancestors.agent.state import (
 )
 from ancestors.dispatch import Dispatcher, DispatchResult
 from ancestors.session import bind_session, clear_session
+from ancestors.tool_registry import TOOLS
 from ancestors.tools.gedcom import load_gedcom
 
 GEDCOM_PATH = Path(__file__).parent.parent / "data" / "export-Ancestors.ged"
@@ -117,7 +118,7 @@ def _build_loop(
 ) -> tuple[AgentLoop, ScriptedPlanner, ScriptedAssessor, Dispatcher]:
     planner = ScriptedPlanner(plans)
     assessor = ScriptedAssessor(assessments)
-    dispatcher = Dispatcher(hooks=hooks)
+    dispatcher = Dispatcher(tools=TOOLS, hooks=hooks)
     loop = AgentLoop(
         planner=planner,
         assessor=assessor,

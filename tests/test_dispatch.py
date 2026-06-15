@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from ancestors.dispatch import TOOLS, Dispatcher
+from ancestors.dispatch import Dispatcher
+from ancestors.tool_registry import TOOLS
 from ancestors.session import bind_session, clear_session
 from ancestors.tools.gedcom import load_gedcom
 
@@ -29,7 +30,7 @@ def session():
 
 @pytest.fixture
 def disp():
-    return Dispatcher()
+    return Dispatcher(tools=TOOLS)
 
 
 def test_unknown_tool_returns_structured_error(disp):
@@ -112,7 +113,7 @@ def test_successful_pipeline_returns_handles(disp):
 
 
 def test_call_budget_enforced():
-    d = Dispatcher()
+    d = Dispatcher(tools=TOOLS)
     from ancestors.dispatch import MAX_CALLS_PER_SESSION
 
     d.call_count = MAX_CALLS_PER_SESSION

@@ -18,16 +18,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from ancestors.dispatch import TOOLS
+from ancestors.dispatch import Tool
 
 
-def export_tools_for_anthropic() -> list[dict[str, Any]]:
+def export_tools_for_anthropic(tools: dict[str, Tool]) -> list[dict[str, Any]]:
     """Return tool definitions in Anthropic's API shape."""
-    return [_tool_def(name) for name in sorted(TOOLS)]
+    return [_tool_def(tools[name]) for name in sorted(tools)]
 
 
-def _tool_def(name: str) -> dict[str, Any]:
-    tool = TOOLS[name]
+def _tool_def(tool: Tool) -> dict[str, Any]:
     raw_schema = tool.args_model.model_json_schema()
     input_schema = _normalize_schema(raw_schema)
     return {
