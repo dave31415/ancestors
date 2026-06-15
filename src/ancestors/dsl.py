@@ -18,6 +18,7 @@ without disturbing the other.
 
 from __future__ import annotations
 
+import sqlite3
 from collections import Counter
 
 from ancestors.models import (
@@ -561,6 +562,42 @@ def get_summary(person_id: str) -> str:
 def get_evidence_gaps(person_id: str) -> list[GapType]:
     db = current_session().db
     return [g.type for g in find_evidence_gaps(db, person_id)]
+
+
+# ---------------------------------------------------------------------------
+# SQL escape hatch.
+#
+# Used when a question doesn't fit tool composition — aggregations, graph
+# patterns over couples, ad-hoc joins. The typed tools are preferred for
+# routine queries; this is the fallback. See sqlite_store/ for the
+# hardening details.
+# ---------------------------------------------------------------------------
+
+
+def run_sql(query: str) -> list[dict]:
+    """Execute one read-only SQL statement against the session's SQLite mirror.
+
+    Returns the result as a list of dicts (one per row). The connection is
+    in-memory, query_only, no ATTACH/load_extension, with a wall-clock
+    timeout and a row cap enforced here.
+    """
+    from ancestors.sqlite_store import MAX_ROWS
+    from ancestors.sqlite_store.safe_conn import reset_timeout
+
+    conn = current_session().sqlite_connection
+    if conn is None:
+        raise RuntimeError(
+            "No SQLite connection on the active session. "
+            "Pass with_sqlite=True to bind_session."
+        )
+
+    reset_timeout(conn)
+    try:
+        rows = conn.execute(query).fetchmany(MAX_ROWS)
+    except sqlite3.OperationalError as exc:
+        # Surfaces syntax errors, authorizer denials, timeouts.
+        raise ValueError(f"SQL error: {exc}") from exc
+    return [dict(row) for row in rows]
 
 
 def _format_place(place) -> str:

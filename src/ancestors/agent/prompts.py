@@ -102,6 +102,76 @@ confidence requires multiple independent sources.
 fill gaps with plausible stories. Reporting "we cannot determine X from
 this data" is valuable, not a failure.
 
+# SQL escape hatch
+
+For queries that don't fit tool composition — complex aggregations, graph
+patterns over couples, ad-hoc joins, recursive ancestor walks — call
+`run_sql(query)` to execute one read-only SQL statement against the corpus.
+
+Use it for: "how many of X by Y," "find pairs of people who share Z,"
+"recursive walk over the parent_child graph," "earliest/latest with
+aggregated fields." Prefer typed tools for named lookups, single-pair
+MRCA, and narrow filters — they are cheaper and more auditable.
+
+## Schema
+
+```
+individuals(id, primary_name, given, surname, sex,
+            birth_year, birth_date_raw, birth_is_approximate,
+            birth_country, birth_state, birth_city, birth_place_raw,
+            birth_has_source,
+            death_year, death_date_raw, death_is_approximate,
+            death_country, death_state, death_city, death_place_raw,
+            death_has_source,
+            burial_year, burial_date_raw,
+            burial_country, burial_state, burial_city)
+
+families(id, husband_id, wife_id,
+         marriage_year, marriage_date_raw,
+         marriage_country, marriage_state, marriage_city)
+
+family_children(family_id, child_id)
+
+parent_child(parent_id, child_id, parent_sex)
+    -- materialised edge; use for recursive CTEs
+
+other_events(individual_id, event_type, year, date_raw,
+             country, state, city, place_raw)
+    -- event_type ∈ {{OCCU, RESI, BAPM, IMMI, EMIG, CENS, ...}}
+
+individual_notes(individual_id, note_index, text)
+```
+
+## Example queries
+
+Earliest birth:
+```sql
+SELECT id, primary_name, birth_year, birth_country
+FROM individuals WHERE birth_year IS NOT NULL
+ORDER BY birth_year LIMIT 1;
+```
+
+Ancestors of a person through 3 generations:
+```sql
+WITH RECURSIVE anc(person_id, ancestor_id, gen) AS (
+  SELECT :pid, :pid, 0
+  UNION ALL
+  SELECT a.person_id, pc.parent_id, a.gen + 1
+  FROM anc a JOIN parent_child pc ON a.ancestor_id = pc.child_id
+  WHERE a.gen < 3
+)
+SELECT a.gen, i.* FROM anc a JOIN individuals i ON i.id = a.ancestor_id;
+```
+
+## Rules
+
+- Read-only. Writes are rejected by the connection.
+- 10-second wall-clock timeout per query.
+- 1000-row result cap.
+- 5000-character query length cap.
+- No ATTACH DATABASE, no load_extension, no file URIs.
+- Parameter binding (`:name`, `?`) is NOT supported here; inline literals.
+
 # Output expectations
 
 When you produce a final answer:

@@ -163,6 +163,19 @@ class _SortBy(BaseModel):
     limit: Annotated[int, Field(ge=1, le=MAX_HYDRATION_LIMIT)] | None = None
 
 
+# Length-bounded so the agent can't smuggle a megabyte query past validation.
+# 5K chars comfortably handles recursive CTEs the agent would plausibly write.
+MAX_SQL_LEN = 5000
+
+
+class _RunSql(BaseModel):
+    model_config = {"extra": "forbid"}
+    query: Annotated[
+        str,
+        StringConstraints(min_length=1, max_length=MAX_SQL_LEN),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Registry — the whitelist. Only tools listed here are dispatchable.
 # ---------------------------------------------------------------------------
@@ -225,6 +238,12 @@ TOOLS: dict[str, Tool] = {
              "Compact, deterministic one-line factual précis of a person."),
         Tool("get_evidence_gaps", _PersonOnly, dsl.get_evidence_gaps,
              "List evidence-gap types for a person (driving the research agenda)."),
+        Tool("run_sql", _RunSql, dsl.run_sql,
+             "Execute one read-only SQL statement against the corpus. Use for "
+             "aggregations, graph patterns (recursive CTEs), or queries the "
+             "typed tools can't express. The schema is included in the system "
+             "prompt. Prefer typed tools for narrow questions (named lookups, "
+             "single-pair MRCA, sorting) — they are cheaper and more auditable."),
     ]
 }
 
